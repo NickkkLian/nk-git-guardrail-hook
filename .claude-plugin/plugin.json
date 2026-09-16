@@ -1,0 +1,19 @@
+{
+  "name": "nk-git-guardrail-hook",
+  "description": "A PreToolUse hook for Claude Code that stops before the git and shell commands that have actually destroyed work \u2014 force push, git add -A in a shared checkout, making a repo public, pushing while behind the remote, a push that records a mass deletion, rm -rf on a project root, curl piped into a shell \u2014 and names the incident in the prompt.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Nick Lian",
+    "url": "https://github.com/NickkkLian"
+  },
+  "homepage": "https://github.com/NickkkLian/nk-git-guardrail-hook",
+  "repository": "https://github.com/NickkkLian/nk-git-guardrail-hook",
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "agent-skills",
+    "git",
+    "hook",
+    "guardrail"
+  ]
+}
