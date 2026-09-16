@@ -93,7 +93,7 @@ git clone https://github.com/NickkkLian/nk-git-guardrail-hook.git ~/.agents/skil
 | OpenAI Codex CLI (0.154.0-alpha.6.2, gpt-5.6-sol, low reasoning, macOS) | partly | Copied into `~/.agents/skills` of a temporary home (the folder route 4 clones into), in a fresh project, without the user's Codex config. From a plain request that never names the skill, Codex read SKILL.md, wrote the hook into `.claude/settings.json`, ran the 39-case self-test and showed that a force push would stop and ask. That hook is written for Claude Code sessions; whether it also guards Codex sessions was not tested. |
 | Cursor, Gemini CLI | no | Not tested. Their documentation says both read `~/.agents/skills`, the folder route 4 clones into; Gemini CLI asks before it activates a skill. |
 
-In the nine Codex runs that used the temporary home, every call into the skill folder's scripts/ used that folder's absolute path. Route 4 was checked separately: all ten repositories cloned from GitHub into a temporary home's `~/.agents/skills` were listed by the step 3 command. These skills' frontmatter uses only name, description, license and metadata.
+In this skill's Codex run, every call into the skill folder's scripts/ used that folder's absolute path. Route 4 was checked for this repository: cloned from GitHub into a temporary home's `~/.agents/skills`, it was listed by the step 3 command. This skill's frontmatter uses only name, description, license and metadata.
 
 ## Verify
 
