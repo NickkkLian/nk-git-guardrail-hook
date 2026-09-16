@@ -12,6 +12,8 @@ metadata:
 of them into the one place every Bash command passes through. Every rule exists because the command in it
 once destroyed something; the prompt says which incident, so the person deciding knows what is at stake.
 
+> **Paths.** Commands in this skill start with `${…SKILL_DIR}`: this skill's own folder, the one that contains this SKILL.md. Claude Code fills it in. If your agent shows the placeholder as written (Codex, Cursor, Gemini CLI and others), replace it with that folder's absolute path before you run the command. Left as it is, it expands to nothing and the path breaks.
+
 ## Install (two minutes)
 
 1. Copy the skill; then print the settings snippet and merge it into `~/.claude/settings.json`:
