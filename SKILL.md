@@ -4,7 +4,7 @@ description: A PreToolUse hook for Claude Code that stops before seven risky git
 license: MIT
 metadata:
   provenance: own practice (2026-08 to 2026-09); no external source
-  version: 0.1.2
+  version: 0.1.3
 ---
 # Git guardrail hook
 
@@ -73,8 +73,8 @@ reason. The only prompts worth keeping are the ones a human should actually deci
 
 ## Provenance
 
-Own practice, 2026-08 to 2026-09. Started as six rules after a capability audit found "govern" to be the
-thinnest layer — many red lines, nothing enforcing them. Rules were then narrowed or hardened using a
+Own practice, 2026-08 to 2026-09. Started as six rules after a review of the author's own setup found
+enforcement to be its thinnest part — many red lines, nothing enforcing them. Rules were then narrowed or hardened using a
 seven-day replay of real command history (about 7,500 commands): one rule went from ask to deny after
 169 prompts with no true positive; a rule with no incident behind it was removed, and another was cut
 down to its `curl | sh` line, kept as rule 7 without an incident. No external source.

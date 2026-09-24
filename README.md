@@ -26,6 +26,14 @@ The full procedure, the boundaries and where the rules came from are in [SKILL.m
 4. Heredoc bodies are data
 5. Same-segment only
 
+## Why it is built this way
+
+**The idea.** A red line that lives in a document is enforced by whoever happens to remember it. This hook moves seven of them into the one place every Bash command passes through, and its prompt says what is at stake: rules 1–5 name the real incident behind them; rules 6 and 7 have no recorded incident, and their prompts say why the step is irreversible or dangerous.
+
+**Where it came from.** Started as six rules after a review of the author's own setup found enforcement to be its thinnest part — many red lines, nothing enforcing them.
+
+**Evidence.** What was broken on purpose to show that the self-tests can fail is under [Verify](#verify); what was run end to end, and in which agent, is under [Compatibility](#compatibility).
+
 ## Install
 
 Pick one of four ways: three for Claude Code, one for OpenAI Codex. Skills load when a session starts, so open a **new** session after installing.
