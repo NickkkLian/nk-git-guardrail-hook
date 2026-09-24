@@ -1,16 +1,17 @@
 ---
 name: nk-git-guardrail-hook
-description: A PreToolUse hook for Claude Code that stops before the git and shell commands that have actually destroyed work — force push, git add -A in a shared checkout, making a repo public, pushing while behind the remote, a push that records a mass deletion, rm -rf on a project root, curl piped into a shell — and names the incident in the prompt. Use when several agent sessions share a machine, when an agent pushes on your behalf, or when you keep clicking through the same confirmation (then replay real command history to narrow or harden the rule). Ask by default, deny only where the agent can fix its own command, fail-open if the hook itself breaks.
+description: A PreToolUse hook for Claude Code that stops before seven risky git and shell commands — force push, git add -A in a shared checkout, making a repo public, pushing while behind the remote, a push that records a mass deletion, rm -rf on a project root, curl piped into a shell. The prompt says what is at stake: for the first five, the real incident behind the rule; for the last two, why the step is irreversible or dangerous. Use when several agent sessions share a machine, when an agent pushes on your behalf, or when you keep clicking through the same confirmation (then replay real command history to narrow or harden the rule). Ask by default, deny only where the agent can fix its own command, fail-open if the hook itself breaks.
 license: MIT
 metadata:
   provenance: own practice (2026-08 to 2026-09); no external source
-  version: 0.1.0
+  version: 0.1.2
 ---
 # Git guardrail hook
 
 **A red line that lives in a document is enforced by whoever happens to remember it.** This hook moves seven
-of them into the one place every Bash command passes through. Every rule exists because the command in it
-once destroyed something; the prompt says which incident, so the person deciding knows what is at stake.
+of them into the one place every Bash command passes through, and its prompt says what is at stake: rules 1–5
+name the real incident behind them; rules 6 and 7 have no recorded incident, and their prompts say why the step
+is irreversible or dangerous.
 
 > **Paths.** Commands in this skill start with `${…SKILL_DIR}`: this skill's own folder, the one that contains this SKILL.md. Claude Code fills it in. If your agent shows the placeholder as written (Codex, Cursor, Gemini CLI and others), replace it with that folder's absolute path before you run the command. Left as it is, it expands to nothing and the path breaks.
 
@@ -26,15 +27,15 @@ once destroyed something; the prompt says which incident, so the person deciding
 
 ## The rules
 
-| # | Command shape | Decision | The incident behind it |
+| # | Command shape | Decision | Why it exists |
 |---|---|---|---|
-| 1 | `git push --force` / `-f` / `+ref` (not `--force-with-lease`) | ask | a shared branch's history rewritten while another session was rebasing onto it |
-| 2 | `git add -A` / `.` / `--all` / `*` / `./` / `:/` | deny (configurable) | with several sessions in one checkout, another session's half-written files were swept into a commit |
-| 3 | `gh repo create/edit --public`, `gh api … private=false` | ask | an internal page went public because nobody was asked; publishing publishes all history |
-| 4 | `git push` while the branch is behind origin (a real `fetch` is run) | ask | a stale local copy was built and deployed over work that only existed on the remote |
-| 5 | `git push` whose pending commits delete ≥ 20 files and 3× more than they add (cumulative since origin) | ask | an interrupted sparse clone left an empty worktree; the commit recorded 1,000+ deletions; add/commit/push all exited 0 |
-| 6 | `rm -rf` on a path ≤ 2 levels under a protected root | ask | irreversible; scratch dirs and temp clones are deliberately not protected |
-| 7 | `curl`/`wget` piped into `sh`/`bash`/`python3`/`node`… | ask | the closing step of every "install script" attack chain; save it, read it, report it |
+| 1 | `git push --force` / `-f` / `+ref` (not `--force-with-lease`) | ask | incident: a shared branch's history rewritten while another session was rebasing onto it |
+| 2 | `git add -A` / `.` / `--all` / `*` / `./` / `:/` | deny (configurable) | incident: with several sessions in one checkout, another session's half-written files were swept into a commit |
+| 3 | `gh repo create/edit --public`, `gh api … private=false` | ask | incident: an internal page went public because nobody was asked; publishing publishes all history |
+| 4 | `git push` while the branch is behind origin (a real `fetch` is run) | ask | incident: a stale local copy was built and deployed over work that only existed on the remote |
+| 5 | `git push` whose pending commits delete ≥ 20 files and 3× more than they add (cumulative since origin) | ask | incident: an interrupted sparse clone left an empty worktree; the commit recorded 1,000+ deletions; add/commit/push all exited 0 |
+| 6 | `rm -rf` on a path ≤ 2 levels under a protected root | ask | no recorded incident: the step is irreversible; scratch dirs and temp clones are deliberately not protected |
+| 7 | `curl`/`wget` piped into `sh`/`bash`/`python3`/`node`… | ask | no recorded incident: it runs downloaded code nobody has read, the closing step of an "install script" attack chain; save it, read it, report it |
 
 Rules 4 and 5 resolve the repository the command acts on (`git -C <path>` > last `cd` > cwd), because the
 incident behind rule 5 happened in a temporary clone, exactly where a cwd-based check is blind.
@@ -46,8 +47,10 @@ incident behind rule 5 happened in a temporary clone, exactly where a cwd-based 
   wrong person; the agent can correct its own command.
 - **Fail-open.** Any internal error → exit 0, no output. A guardrail that blocks every command is worse
   than none. (Detectors are the opposite: they must fail loud. Know which one you are writing.)
-- **Every rule cites its incident.** No rule was added for an imagined risk; imagined risks produce
-  false positives, and a few false positives teach people to click through everything.
+- **Five rules cite an incident; two say why they exist.** Rules were meant to come only from incidents,
+  because imagined risks produce false positives, and a few false positives teach people to click through
+  everything. `rm -rf` on a project root and `curl | sh` are the exceptions: neither has a recorded incident,
+  and their prompts say what is at stake instead — `rm -rf` cannot be undone; `curl | sh` runs code nobody has read.
 - **Heredoc bodies are data**, unless a shell consumes them (`bash <<EOF`, `… | sh`, `eval`, `ssh host <<EOF`).
   Quoted strings are ignored, but `$(…)` inside quotes is kept — it runs.
 - **Same-segment only.** A rule looks at its own command segment (up to `;`, `&&`, `|`, newline); a path in
@@ -73,4 +76,5 @@ reason. The only prompts worth keeping are the ones a human should actually deci
 Own practice, 2026-08 to 2026-09. Started as six rules after a capability audit found "govern" to be the
 thinnest layer — many red lines, nothing enforcing them. Rules were then narrowed or hardened using a
 seven-day replay of real command history (about 7,500 commands): one rule went from ask to deny after
-169 prompts with no true positive; two rules with no incident behind them were removed. No external source.
+169 prompts with no true positive; a rule with no incident behind it was removed, and another was cut
+down to its `curl | sh` line, kept as rule 7 without an incident. No external source.

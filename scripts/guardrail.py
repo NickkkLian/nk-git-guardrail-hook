@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
-"""guardrail.py — a Claude Code PreToolUse hook for Bash that asks (or denies) before the commands that have
-actually caused incidents: force push, `git add -A`, making a repo public, pushing while behind the remote,
-a push that records a mass deletion, `rm -rf` on a project root, and piping downloaded content into a shell.
+"""guardrail.py — a Claude Code PreToolUse hook for Bash that asks (or denies) before seven risky commands:
+force push, `git add -A`, making a repo public, pushing while behind the remote, a push that records a mass
+deletion, `rm -rf` on a project root, and piping downloaded content into a shell.
 
     python3 guardrail.py                        # as a hook: reads the PreToolUse JSON on stdin, prints a decision or nothing
     python3 guardrail.py --try "<command>"      # print the decision this hook would make for a command
     python3 guardrail.py --settings-snippet     # the JSON to add to ~/.claude/settings.json
     python3 guardrail.py --selftest             # three-state samples through the real entry point (subprocess + stdin)
 
-Design rules (each has cost real work when broken):
+Design rules:
   · ask, not deny, unless the fix belongs to the agent — "ask" hands a decision to a human; when the agent can
     correct its own command (`git add -A` → name the files) the answer is deny with the fix in the reason.
   · fail-open: any internal error → exit 0 with no output. A guardrail that blocks every command is worse than none.
-  · every rule names its incident in the reason text, so the person deciding knows what the rule is protecting.
+  · the reason text says what the rule is protecting: rules 1–5 name the incident behind them; rules 6–7 have
+    no recorded incident and say why the step is irreversible or dangerous.
   · heredoc bodies are data, not commands (unless a shell consumes them); quoted strings are stripped but `$(...)`
     inside them is kept, because it runs.
 Config (optional): $GUARDRAIL_CONFIG or ~/.config/guardrail/config.json
@@ -157,13 +158,14 @@ def check(cmd, cwd, cfg):
                           f"worktree, the commit recorded every file as deleted, and add/commit/push all exited 0. "
                           f"Check `git diff --cached --name-status | grep '^D'`; count the remote with `git ls-tree -r --name-only origin/<branch> | wc -l`, not `ls`.")
 
-    # 7 downloaded content piped straight into a shell or interpreter — the closing step of every 'curl | sh' attack chain
+    # 7 downloaded content piped straight into a shell or interpreter — no recorded incident; the closing step of a
+    #   'curl | sh' attack chain
     if re.search(r"(?:curl|wget|iwr)\b[^\n|]*\|\s*(?:sudo\s+)?" + SHELL_TOKEN + r"\b", bare) \
        or re.search(r"(?:curl|wget)\b[^\n|]*\|\s*(?:python3?|node|perl|ruby)\b(?!\s+-(?:c|e|m|n|p|E)\b)", bare):
         decide("ask", "🚨 downloaded content piped straight into a shell/interpreter. Save it to a file, read it, report what it is "
                       "and where it came from — do not run it blind.")
 
-    # 6 rm -rf on a protected project root (depth ≤ 2 under a configured root) — irreversible
+    # 6 rm -rf on a protected project root (depth ≤ 2 under a configured root) — no recorded incident; irreversible
     for m in re.finditer(r"\brm\b[^\n;&|]*-[a-zA-Z]*[rR][a-zA-Z]*f|\brm\b[^\n;&|]*-[a-zA-Z]*f[a-zA-Z]*[rR]", bare):
         seg = re.split(r"[;&|\n]", bare[m.start():m.start() + 400])[0]
         for tok in re.findall(r"(~?/[\w\-./]+|\$\w+)", seg):
