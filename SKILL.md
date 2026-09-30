@@ -1,10 +1,10 @@
 ---
 name: nk-git-guardrail-hook
-description: A PreToolUse hook for Claude Code that stops before seven risky git and shell commands — force push, git add -A in a shared checkout, making a repo public, pushing while behind the remote, a push that records a mass deletion, rm -rf on a project root, curl piped into a shell. The prompt says what is at stake: for the first five, the real incident behind the rule; for the last two, why the step is irreversible or dangerous. Use when several agent sessions share a machine, when an agent pushes on your behalf, or when you keep clicking through the same confirmation (then replay real command history to narrow or harden the rule). Ask by default, deny only where the agent can fix its own command, fail-open if the hook itself breaks.
+description: "A PreToolUse hook for Claude Code that stops before seven risky git and shell commands — force push, git add -A in a shared checkout, making a repo public, pushing while behind the remote, a push that records a mass deletion, rm -rf on a project root, curl piped into a shell. The prompt says what is at stake: for the first five, the real incident behind the rule; for the last two, why the step is irreversible or dangerous. Use when several agent sessions share a machine, when an agent pushes on your behalf, or when you keep clicking through the same confirmation (then replay real command history to narrow or harden the rule). Ask by default, deny only where the agent can fix its own command, fail-open if the hook itself breaks."
 license: MIT
 metadata:
   provenance: own practice (2026-08 to 2026-09); no external source
-  version: 0.1.3
+  version: 0.1.4
 ---
 # Git guardrail hook
 
