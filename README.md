@@ -1,14 +1,18 @@
 # nk-git-guardrail-hook
 
-A [Claude Code](https://code.claude.com) skill. A PreToolUse hook for Claude Code that stops before seven risky git and shell commands — force push, git add -A in a shared checkout, making a repo public, pushing while behind the remote, a push that records a mass deletion, rm -rf on a project root, curl piped into a shell.
+A [Claude Code](https://code.claude.com) skill. A PreToolUse hook for Claude Code that stops before seven risky git and shell commands — force push, git add -A in a shared checkout, making a repo public, pushing while behind the remote, a push that records a mass deletion, a recursive rm on the home folder or the filesystem root, a download run straight in a shell.
 
-**What you get.** One real run of nk-git-guardrail-hook 0.1.5, copied from the terminal on 2026-09-30:
+**What you get.** One real run of nk-git-guardrail-hook 0.1.6, copied from the terminal on 2026-10-01:
 
 ```text
 $ python3 scripts/guardrail.py --try "git push --force-with-lease"
 allow	
 $ python3 scripts/guardrail.py --try "git push origin +main"
 ask	⛔ force push. Incident: a shared branch's history was rewritten while another session was working on it; dangling commits had to be recovered by hand. If you are behind, rebase instead. Sure this is not that case?
+$ python3 scripts/guardrail.py --try "gh repo edit me/app --visibility=public"
+ask	🚨 this makes a repository public. Incident: an internal document went public because nobody was asked. Publishing publishes the whole history. Has a human seen the content and said yes?
+$ python3 scripts/guardrail.py --try "rm -rf ~"
+ask	⛔ recursive rm on ~: that is your home folder. It cannot be undone and nothing goes to a trash. Name the exact sub-folder you mean.
 $ python3 scripts/guardrail.py --try "git add -A"
 deny	⛔ git add -A / . / --all. Incident: with several sessions in one checkout it swept another session's half-written untracked files into this commit. Use `git add -- <named paths>`; run `git status --porcelain` first if unsure.
 ```
@@ -28,13 +32,15 @@ python3 scripts/guardrail.py --selftest
 python3 scripts/replay.py --selftest
 python3 scripts/guardrail.py --try "git push --force-with-lease"
 python3 scripts/guardrail.py --try "git push origin +main"
+python3 scripts/guardrail.py --try "gh repo edit me/app --visibility=public"
+python3 scripts/guardrail.py --try "rm -rf ~"
 python3 scripts/guardrail.py --try "git add -A"
 ```
 
 The self-tests print:
 
 ```text
-✔ guardrail selftest: 54 samples (ask 21 / deny 13 / allow 20)
+✔ guardrail selftest: 110 samples (ask 58 / deny 14 / allow 38) · 7 of 7 rules on with no config file
 replay selftest · 4/4 passed
 ```
 
@@ -50,10 +56,11 @@ The demo above is a rendering of an earlier run and cuts its longest lines short
 
 ## What it does
 
-- Seven rules — force push (`--force`, `-f` or a `+` refspec such as `+main`), `git add -A`, repo → public, push while behind, push that mass-deletes, `rm -rf` on a project root, `curl | sh`. The first five name, in the prompt, the incident behind the rule; the last two say why the step is irreversible or dangerous.
+- Seven rules, all on with no config file — force push (`--force`, `-f` or a `+` refspec such as `+main`), `git add -A`, repo → public (`--public`, `--visibility public` or `--visibility=public`), push while behind, push that mass-deletes, a recursive `rm` on the home folder, the filesystem root or the current folder, and a download run in a shell (`curl | sh` or `sh -c "$(curl …)"`). The first five name, in the prompt, the incident behind the rule; the last two say why the step is irreversible or dangerous.
+- A config file is only for extras: your own project folders for the `rm` rule, and the thresholds.
 - Ask by default; deny only where the agent can fix its own command; fail-open when the hook breaks.
 - `replay.py` runs your real command history through the hook so rules are tuned on evidence.
-- `--try "<command>"` shows the decision; `--selftest` runs 54 samples through the real entry point, five of them against real temporary repositories.
+- `--try "<command>"` shows the decision; `--selftest` runs 110 samples through the real entry point, seven of them against real temporary repositories, and ends by counting the rules that answered with no config file (7 of 7).
 
 The full procedure, the boundaries and where the rules came from are in [SKILL.md](SKILL.md).
 
@@ -62,7 +69,8 @@ The full procedure, the boundaries and where the rules came from are in [SKILL.m
 [cc-safety-net](https://github.com/kenryu42/claude-code-safety-net) is the better-known hook for this job and covers more:
 its blocked-commands list (read 2026-09-30) includes `git reset --hard`, `git clean -f`, `git checkout -- <files>`, `git branch -D`,
 `rm -rf` outside the working directory and `find -delete`, and it supports more agents than Claude Code. This hook blocks none of
-those four git commands. What it has, and that list does not: a push while the branch is behind origin (it runs a real fetch), a push
+those four git commands, and its `rm` rule is narrower: with no config it asks only about the home folder, the filesystem root, a
+folder above home and the current folder. What it has, and that list does not: a push while the branch is behind origin (it runs a real fetch), a push
 whose pending commits delete most of a repository, `git add -A`, and making a repository public; and its prompts carry the incident
 behind the rule. cc-safety-net was read, not installed or run here. `permissions.deny` in settings.json blocks a command pattern
 outright; it cannot look at the repository, so it cannot tell a normal push from one that deletes 1,000 files. The three can run side by side.
@@ -161,10 +169,10 @@ python3 scripts/guardrail.py --selftest
 python3 scripts/replay.py --selftest
 ```
 
-Standard library only, Python 3.9+, and git. On 2026-09-30 every self-test above passed, and
+Standard library only, Python 3.9+, and git. On 2026-10-01 every self-test above passed, and
 `breakcheck.py` from [nk-breakable-selftest](https://github.com/NickkkLian/nk-breakable-selftest) broke each script on purpose in a sandbox copy:
 
-- `guardrail.py`: 9 hand-written breaks, one per rule and two for the cases added in 0.1.5; each turned the self-test red without a traceback.
+- `guardrail.py`: 18 hand-written breaks (one per rule, one for each form added in 0.1.5 and 0.1.6, and one that makes rule 6 depend on a config file again); each turned the self-test red without a traceback.
 - `replay.py`: no break run. No line of it matches the pattern, so nothing in it was broken on purpose; it has a self-test only.
 
 The unmutated control stayed green every time. Only lines that record a finding, raise, or return a failing exit code
@@ -174,10 +182,11 @@ This shows those lines are covered. It does not show that nothing else can fail.
 ## Limits
 
 - Seven rules, not a full safety net. `git reset --hard`, `git clean -f`, `git checkout -- .` and `git branch -D` are allowed: none has an incident behind it here. [cc-safety-net](https://github.com/kenryu42/claude-code-safety-net) blocks those and many more, for more agents; the two can run side by side.
-- The `rm -rf` rule does nothing until `protected_roots` is set in the config.
+- Rule 6 asks about four targets with no config: the home folder, the filesystem root, a folder above home, and `.` or `..`. It does not ask about a folder inside home (`~/Documents`), a bare `*` in an ordinary folder, or a project folder, unless `protected_roots` names it. cc-safety-net asks about every recursive `rm` outside the working directory.
 - Only Bash. A malicious file written with an editor tool and run some other way is not seen.
-- Targets passed through variables (`R=~/projects/app; rm -rf $R`) and heredoc bodies fed to python/node that shell out. Real isolation is a sandbox; this hook removes the most common step.
-- It reads the command, not the files the command runs.
+- Targets passed through variables other than `$HOME` and `$PWD` (`R=~/projects/app; rm -rf $R`) and heredoc bodies fed to python/node that shell out. Real isolation is a sandbox; this hook removes the most common step.
+- It reads the command, not the files the command runs. A download saved first and run second (`curl -o i.sh …; sh i.sh`) is two ordinary commands to it, and `python3 -c "$(curl …)"` is not matched (only the shell forms are).
+- Deleting by other means is not seen: `find ~ -delete`, `xargs rm`, a `cd` in an earlier command of the session.
 
 ## License
 

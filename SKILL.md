@@ -1,10 +1,10 @@
 ---
 name: nk-git-guardrail-hook
-description: "A PreToolUse hook for Claude Code that stops before seven risky git and shell commands — force push, git add -A in a shared checkout, making a repo public, pushing while behind the remote, a push that records a mass deletion, rm -rf on a project root, curl piped into a shell. The prompt says what is at stake: for the first five, the real incident behind the rule; for the last two, why the step is irreversible or dangerous. Use when several agent sessions share a machine, when an agent pushes on your behalf, or when you keep clicking through the same confirmation (then replay real command history to narrow or harden the rule). Ask by default, deny only where the agent can fix its own command, fail-open if the hook itself breaks."
+description: "A PreToolUse hook for Claude Code that stops before seven risky git and shell commands — force push, git add -A in a shared checkout, making a repo public, pushing while behind the remote, a push that records a mass deletion, a recursive rm on the home folder or the filesystem root, a download run straight in a shell. All seven are on with no config file. The prompt says what is at stake: for the first five, the real incident behind the rule; for the last two, why the step is irreversible or dangerous. Use when several agent sessions share a machine, when an agent pushes on your behalf, or when you keep clicking through the same confirmation (then replay real command history to narrow or harden the rule). Ask by default, deny only where the agent can fix its own command, fail-open if the hook itself breaks."
 license: MIT
 metadata:
   provenance: own practice (2026-08 to 2026-09); no external source
-  version: 0.1.5
+  version: 0.1.6
 ---
 # Git guardrail hook
 
@@ -21,21 +21,22 @@ is irreversible or dangerous.
    `python3 ${CLAUDE_SKILL_DIR}/scripts/guardrail.py --settings-snippet`
 2. Optional config at `~/.config/guardrail/config.json`:
    `{"protected_roots": ["~/projects"], "add_all": "deny", "mass_delete_min": 20, "mass_delete_ratio": 3}`
-   `protected_roots` turns on the `rm -rf` rule for project-level paths under those roots.
+   `protected_roots` adds your own project folders to rule 6 (paths up to two levels under those roots). The rule's
+   built-in targets (the home folder, the filesystem root, the current folder) need no config.
 3. Restart the session (hooks load at start). Check it is live: `python3 ${CLAUDE_SKILL_DIR}/scripts/guardrail.py --try "git push --force"` prints `ask` and the reason.
-4. Run the self-test once: `python3 ${CLAUDE_SKILL_DIR}/scripts/guardrail.py --selftest` (54 commands through the real entry point; ask, deny and allow each have samples, and rules 4 and 5 run against real temporary repositories).
+4. Run the self-test once: `python3 ${CLAUDE_SKILL_DIR}/scripts/guardrail.py --selftest` (110 commands through the real entry point; ask, deny and allow each have samples, rules 4 and 5 run against real temporary repositories, and every rule is shown answering with no config file: the last words of the summary line are the count, `7 of 7 rules on with no config file`).
 
 ## The rules
 
 | # | Command shape | Decision | Why it exists |
 |---|---|---|---|
-| 1 | `git push --force` / `-f` / a `+` refspec such as `+main` or `+HEAD:main` (not `--force-with-lease`) | ask | incident: a shared branch's history rewritten while another session was rebasing onto it |
+| 1 | `git push --force` / `-f` / a `+` refspec such as `+main` or `+HEAD:main` (not `--force-with-lease`, with or without `--force-if-includes`) | ask | incident: a shared branch's history rewritten while another session was rebasing onto it |
 | 2 | `git add -A` / `.` / `--all` / `*` / `./` / `:/` | deny (configurable) | incident: with several sessions in one checkout, another session's half-written files were swept into a commit |
-| 3 | `gh repo create/edit --public`, `gh api … private=false` | ask | incident: an internal page went public because nobody was asked; publishing publishes all history |
+| 3 | `gh repo create/edit --public`, `--visibility public` or `--visibility=public`, `gh api … private=false` or `visibility=public` | ask | incident: an internal page went public because nobody was asked; publishing publishes all history |
 | 4 | `git push` while the branch is behind origin (a real `fetch` is run) | ask | incident: a stale local copy was built and deployed over work that only existed on the remote |
 | 5 | `git push` whose pending commits delete ≥ 20 files and 3× more than they add (cumulative since origin) | ask | incident: an interrupted sparse clone left an empty worktree; the commit recorded 1,000+ deletions; add/commit/push all exited 0 |
-| 6 | `rm -rf` on a path ≤ 2 levels under a protected root | ask | no recorded incident: the step is irreversible; scratch dirs and temp clones are deliberately not protected |
-| 7 | `curl`/`wget` piped into `sh`/`bash`/`python3`/`node`… | ask | no recorded incident: it runs downloaded code nobody has read, the closing step of an "install script" attack chain; save it, read it, report it |
+| 6 | a recursive `rm` (`-r`, `-rf`, `-fR`, `--recursive`) on the home folder (`~`, `$HOME`, `"${HOME:?}"`, `~/*`, or `*` after `cd ~`), the filesystem root, a folder above home, or `.` / `..`; with `protected_roots` in the config, also on a path ≤ 2 levels under one of those roots | ask | no recorded incident here: the step is irreversible; scratch dirs and temp clones are deliberately not protected |
+| 7 | `curl`/`wget` piped into `sh`/`bash`/`python3`/`node`…, or run through a shell argument: `sh -c "$(curl …)"`, `bash <(curl …)`, `eval "$(curl …)"` | ask | no recorded incident: it runs downloaded code nobody has read, the closing step of an "install script" attack chain; save it, read it, report it |
 
 Rules 4 and 5 resolve the repository the command acts on (`git -C <path>` > last `cd` > cwd), because the
 incident behind rule 5 happened in a temporary clone, exactly where a cwd-based check is blind.
@@ -49,11 +50,12 @@ incident behind rule 5 happened in a temporary clone, exactly where a cwd-based 
   than none. (Detectors are the opposite: they must fail loud. Know which one you are writing.)
 - **Five rules cite an incident; two say why they exist.** Rules were meant to come only from incidents,
   because imagined risks produce false positives, and a few false positives teach people to click through
-  everything. `rm -rf` on a project root and `curl | sh` are the exceptions: neither has a recorded incident,
-  and their prompts say what is at stake instead — `rm -rf` cannot be undone; `curl | sh` runs code nobody has read.
+  everything. A recursive `rm` on the home folder and `curl | sh` are the exceptions: neither has a recorded incident
+  here, and their prompts say what is at stake instead — the `rm` cannot be undone; `curl | sh` runs code nobody has read.
 - **Heredoc bodies are data**, unless a shell consumes them (`bash <<EOF`, `… | sh`, `eval`, `ssh host <<EOF`).
   Quoted strings are ignored, but `$(…)` inside quotes is kept — it runs — and so is a quoted string handed to
-  a shell (`bash -c '…'`, `sh -lc "…"`, `eval '…'`).
+  a shell (`bash -c '…'`, `sh -lc "…"`, `eval '…'`). A quoted single word keeps its text for rules 3 and 6, so
+  `"$HOME"` and `--visibility "public"` are read as what they name.
 - **Same-segment only.** A rule looks at its own command segment (up to `;`, `&&`, `|`, newline); a path in
   the next command is not blamed on this `rm`. The price: a target passed through a variable is invisible.
 
@@ -70,11 +72,15 @@ reason. The only prompts worth keeping are the ones a human should actually deci
 - Seven rules, not a full safety net. `git reset --hard`, `git clean -f`, `git checkout -- .` and `git branch -D`
   are allowed: none has an incident behind it here. [cc-safety-net](https://github.com/kenryu42/claude-code-safety-net)
   blocks those and many more, for more agents; the two can run side by side.
-- The `rm -rf` rule does nothing until `protected_roots` is set in the config.
+- Rule 6 asks about four targets with no config: the home folder, the filesystem root, a folder above home, and `.` or
+  `..`. It does not ask about a folder inside home (`~/Documents`), a bare `*` in an ordinary folder, or a project
+  folder, unless `protected_roots` names it. cc-safety-net asks about every recursive `rm` outside the working directory.
 - Only Bash. A malicious file written with an editor tool and run some other way is not seen.
-- Targets passed through variables (`R=~/projects/app; rm -rf $R`) and heredoc bodies fed to
+- Targets passed through variables other than `$HOME` and `$PWD` (`R=~/projects/app; rm -rf $R`) and heredoc bodies fed to
   python/node that shell out. Real isolation is a sandbox; this hook removes the most common step.
-- It reads the command, not the files the command runs.
+- It reads the command, not the files the command runs. A download saved first and run second (`curl -o i.sh …; sh i.sh`) is two
+  ordinary commands to it, and `python3 -c "$(curl …)"` is not matched (only the shell forms are).
+- Deleting by other means is not seen: `find ~ -delete`, `xargs rm`, a `cd` in an earlier command of the session.
 
 ## Provenance
 
