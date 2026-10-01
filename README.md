@@ -1,30 +1,79 @@
 # nk-git-guardrail-hook
 
-![nk-git-guardrail-hook](https://raw.githubusercontent.com/NickkkLian/nickkk-skills/main/gallery/social/nk-git-guardrail-hook.png)
-
 A [Claude Code](https://code.claude.com) skill. A PreToolUse hook for Claude Code that stops before seven risky git and shell commands — force push, git add -A in a shared checkout, making a repo public, pushing while behind the remote, a push that records a mass deletion, rm -rf on a project root, curl piped into a shell.
+
+**What you get.** One real run of nk-git-guardrail-hook 0.1.5, copied from the terminal on 2026-09-30:
+
+```text
+$ python3 scripts/guardrail.py --try "git push --force-with-lease"
+allow	
+$ python3 scripts/guardrail.py --try "git push origin +main"
+ask	⛔ force push. Incident: a shared branch's history was rewritten while another session was working on it; dangling commits had to be recovered by hand. If you are behind, rebase instead. Sure this is not that case?
+$ python3 scripts/guardrail.py --try "git add -A"
+deny	⛔ git add -A / . / --all. Incident: with several sessions in one checkout it swept another session's half-written untracked files into this commit. Use `git add -- <named paths>`; run `git status --porcelain` first if unsure.
+```
+
+![nk-git-guardrail-hook](https://raw.githubusercontent.com/NickkkLian/nickkk-skills/main/gallery/social/nk-git-guardrail-hook.png)
 
 Part of [nickkk-skills](https://github.com/NickkkLian/nickkk-skills) — skills that stop an AI coding agent's
 "done, tested, safe" from being taken on faith.
 
+## Try it
+
+Nothing is installed and nothing under `~/.claude` changes: clone, run the self-test, run the example.
+
+```bash
+git clone https://github.com/NickkkLian/nk-git-guardrail-hook && cd nk-git-guardrail-hook
+python3 scripts/guardrail.py --selftest
+python3 scripts/replay.py --selftest
+python3 scripts/guardrail.py --try "git push --force-with-lease"
+python3 scripts/guardrail.py --try "git push origin +main"
+python3 scripts/guardrail.py --try "git add -A"
+```
+
+The self-tests print:
+
+```text
+✔ guardrail selftest: 54 samples (ask 21 / deny 13 / allow 20)
+replay selftest · 4/4 passed
+```
+
+The last command prints the block at the top of this page; its last line is the one below, and its exit code is 0.
+
+```text
+deny	⛔ git add -A / . / --all. Incident: with several sessions in one checkout it swept another session's half-written untracked files into this commit. Use `git add -- <named paths>`; run `git status --porcelain` first if unsure.
+```
+
 ![nk-git-guardrail-hook demo: before and after](https://raw.githubusercontent.com/NickkkLian/nickkk-skills/main/gallery/nk-git-guardrail-hook.gif)
+
+The demo above is a rendering of an earlier run and cuts its longest lines short; the block at the top of this page is a full run of this version.
 
 ## What it does
 
-- Seven rules — force push, `git add -A`, repo → public, push while behind, push that mass-deletes, `rm -rf` on a project root, `curl | sh`. The first five name, in the prompt, the incident behind the rule; the last two say why the step is irreversible or dangerous.
+- Seven rules — force push (`--force`, `-f` or a `+` refspec such as `+main`), `git add -A`, repo → public, push while behind, push that mass-deletes, `rm -rf` on a project root, `curl | sh`. The first five name, in the prompt, the incident behind the rule; the last two say why the step is irreversible or dangerous.
 - Ask by default; deny only where the agent can fix its own command; fail-open when the hook breaks.
 - `replay.py` runs your real command history through the hook so rules are tuned on evidence.
-- `--try "<command>"` shows the decision; `--selftest` runs 39 samples through the real entry point.
+- `--try "<command>"` shows the decision; `--selftest` runs 54 samples through the real entry point, five of them against real temporary repositories.
 
 The full procedure, the boundaries and where the rules came from are in [SKILL.md](SKILL.md).
 
+## Next to cc-safety-net and permissions.deny
+
+[cc-safety-net](https://github.com/kenryu42/claude-code-safety-net) is the better-known hook for this job and covers more:
+its blocked-commands list (read 2026-09-30) includes `git reset --hard`, `git clean -f`, `git checkout -- <files>`, `git branch -D`,
+`rm -rf` outside the working directory and `find -delete`, and it supports more agents than Claude Code. This hook blocks none of
+those four git commands. What it has, and that list does not: a push while the branch is behind origin (it runs a real fetch), a push
+whose pending commits delete most of a repository, `git add -A`, and making a repository public; and its prompts carry the incident
+behind the rule. cc-safety-net was read, not installed or run here. `permissions.deny` in settings.json blocks a command pattern
+outright; it cannot look at the repository, so it cannot tell a normal push from one that deletes 1,000 files. The three can run side by side.
+
 ## How it works
 
-1. Ask, not deny
-2. Fail-open
-3. Five rules cite an incident; two say why they exist
-4. Heredoc bodies are data
-5. Same-segment only
+1. Ask, not deny — except where the fix belongs to the agent.
+2. Fail-open. Any internal error → exit 0, no output.
+3. Five rules cite an incident; two say why they exist.
+4. Heredoc bodies are data, unless a shell consumes them (`bash <<EOF`, `… | sh`, `eval`, `ssh host <<EOF`).
+5. Same-segment only. A rule looks at its own command segment (up to `;`, `&&`, `|`, newline); a path in the next command is not blamed on this `rm`.
 
 ## Why it is built this way
 
@@ -112,12 +161,20 @@ python3 scripts/guardrail.py --selftest
 python3 scripts/replay.py --selftest
 ```
 
-Standard library only, Python 3.9+. Before publishing, the guarded lines of each script were
-mutated one at a time in a sandbox copy and the self-test was confirmed to go red on the named
-assertion, without a traceback; the unmutated control stayed green.
+Standard library only, Python 3.9+, and git. On 2026-09-30 every self-test above passed, and
+`breakcheck.py` from [nk-breakable-selftest](https://github.com/NickkkLian/nk-breakable-selftest) broke each script on purpose in a sandbox copy:
+
+- `guardrail.py`: 9 hand-written breaks, one per rule and two for the cases added in 0.1.5; each turned the self-test red without a traceback.
+- `replay.py`: no break run. No line of it matches the pattern, so nothing in it was broken on purpose; it has a self-test only.
+
+The unmutated control stayed green every time. Only lines that record a finding, raise, or return a failing exit code
+were broken (the tool's pattern, or the hand-written list); a line number refers to the script as shipped in this version.
+This shows those lines are covered. It does not show that nothing else can fail.
 
 ## Limits
 
+- Seven rules, not a full safety net. `git reset --hard`, `git clean -f`, `git checkout -- .` and `git branch -D` are allowed: none has an incident behind it here. [cc-safety-net](https://github.com/kenryu42/claude-code-safety-net) blocks those and many more, for more agents; the two can run side by side.
+- The `rm -rf` rule does nothing until `protected_roots` is set in the config.
 - Only Bash. A malicious file written with an editor tool and run some other way is not seen.
 - Targets passed through variables (`R=~/projects/app; rm -rf $R`) and heredoc bodies fed to python/node that shell out. Real isolation is a sandbox; this hook removes the most common step.
 - It reads the command, not the files the command runs.

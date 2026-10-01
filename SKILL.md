@@ -4,7 +4,7 @@ description: "A PreToolUse hook for Claude Code that stops before seven risky gi
 license: MIT
 metadata:
   provenance: own practice (2026-08 to 2026-09); no external source
-  version: 0.1.4
+  version: 0.1.5
 ---
 # Git guardrail hook
 
@@ -23,13 +23,13 @@ is irreversible or dangerous.
    `{"protected_roots": ["~/projects"], "add_all": "deny", "mass_delete_min": 20, "mass_delete_ratio": 3}`
    `protected_roots` turns on the `rm -rf` rule for project-level paths under those roots.
 3. Restart the session (hooks load at start). Check it is live: `python3 ${CLAUDE_SKILL_DIR}/scripts/guardrail.py --try "git push --force"` prints `ask` and the reason.
-4. Run the self-test once: `python3 ${CLAUDE_SKILL_DIR}/scripts/guardrail.py --selftest` (39 commands through the real entry point; ask, deny and allow each have samples).
+4. Run the self-test once: `python3 ${CLAUDE_SKILL_DIR}/scripts/guardrail.py --selftest` (54 commands through the real entry point; ask, deny and allow each have samples, and rules 4 and 5 run against real temporary repositories).
 
 ## The rules
 
 | # | Command shape | Decision | Why it exists |
 |---|---|---|---|
-| 1 | `git push --force` / `-f` / `+ref` (not `--force-with-lease`) | ask | incident: a shared branch's history rewritten while another session was rebasing onto it |
+| 1 | `git push --force` / `-f` / a `+` refspec such as `+main` or `+HEAD:main` (not `--force-with-lease`) | ask | incident: a shared branch's history rewritten while another session was rebasing onto it |
 | 2 | `git add -A` / `.` / `--all` / `*` / `./` / `:/` | deny (configurable) | incident: with several sessions in one checkout, another session's half-written files were swept into a commit |
 | 3 | `gh repo create/edit --public`, `gh api … private=false` | ask | incident: an internal page went public because nobody was asked; publishing publishes all history |
 | 4 | `git push` while the branch is behind origin (a real `fetch` is run) | ask | incident: a stale local copy was built and deployed over work that only existed on the remote |
@@ -52,7 +52,8 @@ incident behind rule 5 happened in a temporary clone, exactly where a cwd-based 
   everything. `rm -rf` on a project root and `curl | sh` are the exceptions: neither has a recorded incident,
   and their prompts say what is at stake instead — `rm -rf` cannot be undone; `curl | sh` runs code nobody has read.
 - **Heredoc bodies are data**, unless a shell consumes them (`bash <<EOF`, `… | sh`, `eval`, `ssh host <<EOF`).
-  Quoted strings are ignored, but `$(…)` inside quotes is kept — it runs.
+  Quoted strings are ignored, but `$(…)` inside quotes is kept — it runs — and so is a quoted string handed to
+  a shell (`bash -c '…'`, `sh -lc "…"`, `eval '…'`).
 - **Same-segment only.** A rule looks at its own command segment (up to `;`, `&&`, `|`, newline); a path in
   the next command is not blamed on this `rm`. The price: a target passed through a variable is invisible.
 
@@ -66,6 +67,10 @@ reason. The only prompts worth keeping are the ones a human should actually deci
 
 ## Boundaries (what it cannot see)
 
+- Seven rules, not a full safety net. `git reset --hard`, `git clean -f`, `git checkout -- .` and `git branch -D`
+  are allowed: none has an incident behind it here. [cc-safety-net](https://github.com/kenryu42/claude-code-safety-net)
+  blocks those and many more, for more agents; the two can run side by side.
+- The `rm -rf` rule does nothing until `protected_roots` is set in the config.
 - Only Bash. A malicious file written with an editor tool and run some other way is not seen.
 - Targets passed through variables (`R=~/projects/app; rm -rf $R`) and heredoc bodies fed to
   python/node that shell out. Real isolation is a sandbox; this hook removes the most common step.

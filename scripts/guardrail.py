@@ -15,7 +15,7 @@ Design rules:
   · the reason text says what the rule is protecting: rules 1–5 name the incident behind them; rules 6–7 have
     no recorded incident and say why the step is irreversible or dangerous.
   · heredoc bodies are data, not commands (unless a shell consumes them); quoted strings are stripped but `$(...)`
-    inside them is kept, because it runs.
+    inside them is kept, because it runs, and so is a quoted string handed to a shell (`bash -c '…'`, `eval '…'`).
 Config (optional): $GUARDRAIL_CONFIG or ~/.config/guardrail/config.json
   {"protected_roots": ["~/projects"], "add_all": "deny" | "ask" | "off", "mass_delete_min": 20, "mass_delete_ratio": 3}
 """
@@ -45,6 +45,9 @@ def decide(decision, reason):
 HEREDOC_RE = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_]\w*)\1")
 SHELL_TOKEN = r"(?:ba|z|d|da|k|c|tc|fi)?sh"
 SHELL_CONSUMER_RE = re.compile(r"(?:^|[\s;&|(`$'\"])(?:\S*/)?" + SHELL_TOKEN + r"\b|(?:\bsource|(?:^|[\s;&|])\.)\s+/dev/stdin|\beval\b|\bssh\b|\$SHELL\b")
+
+
+SHELL_ARG_RE = re.compile(r"(?:(?:^|[\s;&|(])(?:\S*/)?" + SHELL_TOKEN + r"\s+(?:-[A-Za-z]+\s+)*-[A-Za-z]*c|\beval)\s+(\"[^\"]*\"|'[^']*')")
 
 
 def strip_heredocs(cmd):
@@ -125,10 +128,12 @@ def behind_origin(repo):
 def check(cmd, cwd, cfg):
     cmd_s = strip_heredocs(cmd)
     subs = re.findall(r"\$\([^()]*\)|`[^`]*`", cmd_s)
-    bare = re.sub(r'"[^"]*"|\'[^\']*\'', " ", cmd_s) + "\n" + "\n".join(subs)   # $(…) kept: it executes even inside quotes
+    # a quoted string handed to a shell (`bash -c '…'`, `sh -lc "…"`, `eval '…'`) is a command, not data: keep it too
+    shell_args = [m.group(1)[1:-1] for m in SHELL_ARG_RE.finditer(cmd_s)]
+    bare = re.sub(r'"[^"]*"|\'[^\']*\'', " ", cmd_s) + "\n" + "\n".join(subs + shell_args)   # $(…) kept: it executes even inside quotes
 
     # 1 force push — incident: a shared branch's history rewritten while another session was rebasing onto it
-    if re.search(r"\bgit\b[^\n;&|]*\bpush\b[^\n;&|]*(--force(?!-with-lease)|\s-f\b|\s\+refs)", bare):
+    if re.search(r"\bgit\b[^\n;&|]*\bpush\b[^\n;&|]*(--force(?!-with-lease)|\s-f\b|\s\+[\w./-])", bare):
         decide("ask", "⛔ force push. Incident: a shared branch's history was rewritten while another session was working on it; "
                       "dangling commits had to be recovered by hand. If you are behind, rebase instead. Sure this is not that case?")
 
@@ -186,10 +191,8 @@ def main():
         cmd = (data.get("tool_input") or {}).get("command") or ""
         if cmd:
             check(cmd, data.get("cwd") or os.getcwd(), load_config())
-    except SystemExit:
-        raise
     except Exception:
-        pass   # fail-open: a broken guardrail must never block work
+        pass   # fail-open: a broken guardrail must never block work (SystemExit, how decide() ends, is not an Exception)
 
 
 def try_cmd(cmd, cwd=None):
@@ -230,12 +233,39 @@ def selftest():
         ("git push --force-with-lease", "allow"), ("git push -f origin main", "ask"), ("gh repo edit o/r --visibility public", "ask"),
         ("gh repo create o/r --private", "allow"), (f"rm -rf {A}", "ask"), (f"rm -rf {A}/src", "ask"), (f"rm -rf {A}/src/build/tmp", "allow"),
         (f"rm -rf {tmp}/scratch/clone", "allow"), ("rm -rf /tmp/whatever", "allow"),
+        # a forced update written as a refspec: +<ref>, +<src>:<dst>, +refs/…  (until 0.1.4 only `+refs` matched)
+        ("git push origin +main", "ask"), ("git push origin +main:main", "ask"), ("git push origin +HEAD:refs/heads/main", "ask"),
+        ("git push origin +refs/heads/main", "ask"), ('git commit -m "+1 for the fix" && git push --dry-run origin main', "allow"),
+        # a command handed to a shell in quotes is still a command
+        ("bash -c 'git push --force'", "ask"), ('sh -lc "git add -A"', "deny"), ("eval 'git push -f origin main'", "ask"),
+        ("bash -c 'echo git is fine'", "allow"), ("echo 'git push --force is banned here'", "allow"),
     ]
     bad = []
     for cmd, want in cases:
         got, _ = try_cmd(cmd, cwd=root)
         if got != want:
             bad.append((cmd.replace("\n", "⏎")[:70], want, got))
+    # rules 4 and 5 read a real repository: a bare origin with 25 files, one clone that is behind, one that deleted everything
+    env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.com", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.com")
+    def g(cwd, *a):
+        return subprocess.run(["git", "-C", cwd, *a], capture_output=True, text=True, env=env)
+    origin, work, stale, wiped = (os.path.join(tmp, x) for x in ("origin.git", "work", "stale", "wiped"))
+    os.makedirs(origin); g(origin, "init", "-q", "--bare"); g(origin, "symbolic-ref", "HEAD", "refs/heads/main")
+    g(tmp, "clone", "-q", origin, work); g(work, "checkout", "-q", "-b", "main")
+    for i in range(25):
+        open(os.path.join(work, f"f{i}.txt"), "w").write(str(i))
+    g(work, "add", "--", *[f"f{i}.txt" for i in range(25)]); g(work, "commit", "-q", "-m", "base"); g(work, "push", "-q", "origin", "main")
+    g(tmp, "clone", "-q", origin, stale); g(tmp, "clone", "-q", origin, wiped)
+    open(os.path.join(work, "new.txt"), "w").write("x"); g(work, "add", "--", "new.txt"); g(work, "commit", "-q", "-m", "more"); g(work, "push", "-q", "origin", "main")
+    g(wiped, "pull", "-q", "origin", "main"); g(wiped, "rm", "-q", "-r", "--", "."); g(wiped, "commit", "-q", "-m", "empty worktree committed")
+    repo_cases = [("git push origin main", work, "allow", ""), ("git push origin main", stale, "ask", "behind origin"),
+                  ("git push origin main", wiped, "ask", "this push deletes 26 files"), (f"git -C {wiped} push", root, "ask", "this push deletes 26 files"),
+                  ("git push --dry-run origin main", stale, "allow", "")]
+    for cmd, cwd, want, text in repo_cases:
+        got, why = try_cmd(cmd, cwd=cwd)
+        if got != want or text not in why:
+            bad.append((f"{cmd}  (in {os.path.basename(cwd)}, reason must say '{text}')", want, got))
+    cases = cases + [(c, w) for c, _, w, _ in repo_cases]
     n = {w: sum(1 for _, x in cases if x == w) for w in ("ask", "deny", "allow")}
     if bad:
         for c, w, g in bad:
