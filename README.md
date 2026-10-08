@@ -188,6 +188,10 @@ This shows those lines are covered. It does not show that nothing else can fail.
 - It reads the command, not the files the command runs. A download saved first and run second (`curl -o i.sh …; sh i.sh`) is two ordinary commands to it, and `python3 -c "$(curl …)"` is not matched (only the shell forms are).
 - Deleting by other means is not seen: `find ~ -delete`, `xargs rm`, a `cd` in an earlier command of the session.
 
+## Privacy
+
+This hook runs on your computer: Claude Code starts it before each shell command. It reads the command about to run and the folder it runs in, plus your config file if you made one, and answers allow, ask or deny; the hook itself writes no file and keeps nothing. Before a `git push` it asks git about that repository (how far behind it is, how many files the push deletes) and runs `git fetch` for the current branch, so git contacts the repository's own remote and updates its local record of that branch, as a fetch always does; nothing else leaves your computer through the hook. The bundled `replay.py` runs only when you start it: it reads your Claude Code session transcripts under `~/.claude/projects`, puts the shell commands in them through the hook (a past `git push` triggers the same fetch), prints counts and sample commands, and writes a file only with `--out`. Questions: open an issue on this repository.
+
 ## License
 
 MIT. Read a script before letting it run in your environment.
