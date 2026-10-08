@@ -4,7 +4,7 @@ description: "A PreToolUse hook for Claude Code that stops before seven risky gi
 license: MIT
 metadata:
   provenance: own practice (2026-08 to 2026-09); no external source
-  version: 0.1.6
+  version: 0.1.7
 ---
 # Git guardrail hook
 

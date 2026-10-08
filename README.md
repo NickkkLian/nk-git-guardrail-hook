@@ -2,7 +2,7 @@
 
 A [Claude Code](https://code.claude.com) skill. A PreToolUse hook for Claude Code that stops before seven risky git and shell commands — force push, git add -A in a shared checkout, making a repo public, pushing while behind the remote, a push that records a mass deletion, a recursive rm on the home folder or the filesystem root, a download run straight in a shell.
 
-**What you get.** One real run of nk-git-guardrail-hook 0.1.6, copied from the terminal on 2026-10-01:
+**What you get.** One real run of nk-git-guardrail-hook 0.1.7, copied from the terminal on 2026-10-08:
 
 ```text
 $ python3 scripts/guardrail.py --try "git push --force-with-lease"
@@ -169,7 +169,7 @@ python3 scripts/guardrail.py --selftest
 python3 scripts/replay.py --selftest
 ```
 
-Standard library only, Python 3.9+, and git. On 2026-10-01 every self-test above passed, and
+Standard library only, Python 3.9+, and git. On 2026-10-08 every self-test above passed, and
 `breakcheck.py` from [nk-breakable-selftest](https://github.com/NickkkLian/nk-breakable-selftest) broke each script on purpose in a sandbox copy:
 
 - `guardrail.py`: 18 hand-written breaks (one per rule, one for each form added in 0.1.5 and 0.1.6, and one that makes rule 6 depend on a config file again); each turned the self-test red without a traceback.
