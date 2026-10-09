@@ -1,7 +1,7 @@
 {
   "name": "nk-git-guardrail-hook",
   "description": "A PreToolUse hook for Claude Code that stops before seven risky git and shell commands \u2014 force push, git add -A in a shared checkout, making a repo public, pushing while behind the remote, a push that records a mass deletion, a recursive rm on the home folder or the filesystem root, a download run straight in a shell.",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "author": {
     "name": "Nick Lian",
     "url": "https://github.com/NickkkLian"

@@ -4,7 +4,7 @@ description: "A PreToolUse hook for Claude Code that stops before seven risky gi
 license: MIT
 metadata:
   provenance: own practice (2026-08 to 2026-09); no external source
-  version: 0.1.7
+  version: 0.1.8
 ---
 # Git guardrail hook
 
@@ -41,6 +41,26 @@ is irreversible or dangerous.
 Rules 4 and 5 resolve the repository the command acts on (`git -C <path>` > last `cd` > cwd), because the
 incident behind rule 5 happened in a temporary clone, exactly where a cwd-based check is blind.
 
+## A first look: your own last 30 days
+
+`python3 ${CLAUDE_SKILL_DIR}/scripts/replay.py --summary` reads the Claude Code session files under `~/.claude/projects`
+(subagent sessions included), takes every shell command of the last 30 days (`--days N` for another period) and puts
+each one that a rule could read through the hook. It prints seven lines, one per rule: how many of those commands the
+hook would have refused or asked about, one of them as an example, and a plain `0` where the rule never fired. It works
+before the hook is installed, so it is the quickest way to see whether these seven rules are about your work.
+
+- Each command is judged in the folder its session recorded for it, when that folder still exists.
+- Nothing is pushed, committed or changed in a working tree, and no network is reached. The two push lines (behind its
+  remote, deletes most of a repository) are judged on what is already on disk: each repository as it is today, against
+  its remote as of your last fetch. The screen says "as of your last fetch" on both lines; a repository you have not
+  fetched lately can be further behind than it says.
+- `--summary --fetch` asks the remotes first. It runs `git fetch -q origin <branch>` once in each repository that a past
+  push names (the screen without `--fetch` tells you how many that is), which is what the hook does before a live push.
+  git then contacts each of those remotes and updates its local record of that one branch.
+- The examples are your own commands and can hold private paths. `--no-examples` prints the counts alone.
+- `python3 ${CLAUDE_SKILL_DIR}/scripts/replay.py --demo` prints the same screen from an invented history (a made-up
+  month of commands and a temporary repository that is three commits behind a remote next to it) and reads nothing of yours.
+
 ## Design rules (why it is built this way)
 
 - **Ask, not deny** — except where the fix belongs to the agent. `git add -A` is denied with the fix in the
@@ -63,7 +83,8 @@ incident behind rule 5 happened in a temporary clone, exactly where a cwd-based 
 
 When the same prompt keeps appearing: `python3 ${CLAUDE_SKILL_DIR}/scripts/replay.py --days 7` feeds every
 Bash command your sessions ran (subagents included) through the hook and prints the decision distribution
-with samples per reason. Run it before and after a rule change; the diff is the evidence. Two outcomes:
+with samples per reason (for each past push the hook runs its `git fetch`, as before a live one).
+Run it before and after a rule change; the diff is the evidence. Two outcomes:
 false positives → narrow the rule; true positives that the agent can fix itself → deny with the fix in the
 reason. The only prompts worth keeping are the ones a human should actually decide.
 
@@ -81,6 +102,11 @@ reason. The only prompts worth keeping are the ones a human should actually deci
 - It reads the command, not the files the command runs. A download saved first and run second (`curl -o i.sh …; sh i.sh`) is two
   ordinary commands to it, and `python3 -c "$(curl …)"` is not matched (only the shell forms are).
 - Deleting by other means is not seen: `find ~ -delete`, `xargs rm`, a `cd` in an earlier command of the session.
+- `replay.py --summary` counts what the hook says today. A push that was behind its remote last week and has been pulled
+  since counts as 0; a command whose folder is gone is judged in the folder you run the summary from. Without `--fetch`
+  it knows each remote only as of your last fetch.
+- The full replay (`replay.py` without `--summary`) goes through the hook's real entry point, so it runs the hook's
+  `git fetch` for every past push it replays, as it did before 0.1.8.
 
 ## Provenance
 

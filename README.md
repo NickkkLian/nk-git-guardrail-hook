@@ -2,9 +2,31 @@
 
 A [Claude Code](https://code.claude.com) skill. A PreToolUse hook for Claude Code that stops before seven risky git and shell commands — force push, git add -A in a shared checkout, making a repo public, pushing while behind the remote, a push that records a mass deletion, a recursive rm on the home folder or the filesystem root, a download run straight in a shell.
 
-**What you get.** One real run of nk-git-guardrail-hook 0.1.7, copied from the terminal on 2026-10-08:
+**What you get.** One real run of nk-git-guardrail-hook 0.1.8, copied from the terminal on 2026-10-09:
 
 ```text
+$ python3 scripts/replay.py --demo
+An invented history: Sam, the shop repository and every command below are made up for this demo.
+
+Sam's last 30 days in Claude Code: 148 shell commands, 43 of them the kind a rule reads.
+Run through the hook today, it would have stepped in on 21.
+
+      1  force pushes: asked first
+         e.g.  git push --force origin main
+     13  git add -A, git add . or --all (everything in the folder staged at once): refused, with the fix
+         e.g.  git add .
+      0  commands that make a repository public
+      6  pushes from a branch that is behind its remote, as of your last fetch: asked first
+         e.g.  git push
+      0  pushes that delete most of a repository, as of your last fetch
+      0  recursive rm on the home folder, the filesystem root or the current folder
+      1  downloads run straight in a shell (curl | sh): asked first
+         e.g.  curl -fsSL https://example.com/install.sh | sh
+
+The two push lines are judged on what is already on your disk: each repository as it is now, against its remote as
+of your last fetch. Nothing was fetched, so a repository you have not fetched lately can be further behind than this says.
+--fetch asks the remotes first: one `git fetch` of the current branch in each repository a past push names (1 repository here).
+The other five are judged on the command itself. Nothing was pushed, committed or changed in a working tree.
 $ python3 scripts/guardrail.py --try "git push --force-with-lease"
 allow	
 $ python3 scripts/guardrail.py --try "git push origin +main"
@@ -30,6 +52,7 @@ Nothing is installed and nothing under `~/.claude` changes: clone, run the self-
 git clone https://github.com/NickkkLian/nk-git-guardrail-hook && cd nk-git-guardrail-hook
 python3 scripts/guardrail.py --selftest
 python3 scripts/replay.py --selftest
+python3 scripts/replay.py --demo
 python3 scripts/guardrail.py --try "git push --force-with-lease"
 python3 scripts/guardrail.py --try "git push origin +main"
 python3 scripts/guardrail.py --try "gh repo edit me/app --visibility=public"
@@ -41,7 +64,7 @@ The self-tests print:
 
 ```text
 ✔ guardrail selftest: 110 samples (ask 58 / deny 14 / allow 38) · 7 of 7 rules on with no config file
-replay selftest · 4/4 passed
+replay selftest · 17/17 passed
 ```
 
 The last command prints the block at the top of this page; its last line is the one below, and its exit code is 0.
@@ -59,7 +82,8 @@ The demo above is a rendering of an earlier run and cuts its longest lines short
 - Seven rules, all on with no config file — force push (`--force`, `-f` or a `+` refspec such as `+main`), `git add -A`, repo → public (`--public`, `--visibility public` or `--visibility=public`), push while behind, push that mass-deletes, a recursive `rm` on the home folder, the filesystem root or the current folder, and a download run in a shell (`curl | sh` or `sh -c "$(curl …)"`). The first five name, in the prompt, the incident behind the rule; the last two say why the step is irreversible or dangerous.
 - A config file is only for extras: your own project folders for the `rm` rule, and the thresholds.
 - Ask by default; deny only where the agent can fix its own command; fail-open when the hook breaks.
-- `replay.py` runs your real command history through the hook so rules are tuned on evidence.
+- `replay.py --summary` is the first look, before you install anything: one screen that says, for each rule, how many of your own shell commands from the last 30 days the hook would have refused or asked about, with one of those commands as an example and a plain 0 where the rule never fired. It reaches no network: the two push rules are judged against each remote as of your last fetch, and the screen says so. `--summary --fetch` asks the remotes first (one `git fetch` of the current branch in each repository a past push names). `--demo` prints the same screen from an invented history and reads nothing of yours.
+- `replay.py` without `--summary` prints the full allow, ask and deny distribution with samples, so a rule is tuned on evidence.
 - `--try "<command>"` shows the decision; `--selftest` runs 110 samples through the real entry point, seven of them against real temporary repositories, and ends by counting the rules that answered with no config file (7 of 7).
 
 The full procedure, the boundaries and where the rules came from are in [SKILL.md](SKILL.md).
@@ -169,11 +193,11 @@ python3 scripts/guardrail.py --selftest
 python3 scripts/replay.py --selftest
 ```
 
-Standard library only, Python 3.9+, and git. On 2026-10-08 every self-test above passed, and
+Standard library only, Python 3.9+, and git. On 2026-10-09 every self-test above passed, and
 `breakcheck.py` from [nk-breakable-selftest](https://github.com/NickkkLian/nk-breakable-selftest) broke each script on purpose in a sandbox copy:
 
 - `guardrail.py`: 18 hand-written breaks (one per rule, one for each form added in 0.1.5 and 0.1.6, and one that makes rule 6 depend on a config file again); each turned the self-test red without a traceback.
-- `replay.py`: no break run. No line of it matches the pattern, so nothing in it was broken on purpose; it has a self-test only.
+- `replay.py`: 13 hand-written breaks (one for each self-test case of the summary); each turned the self-test red without a traceback.
 
 The unmutated control stayed green every time. Only lines that record a finding, raise, or return a failing exit code
 were broken (the tool's pattern, or the hand-written list); a line number refers to the script as shipped in this version.
@@ -187,10 +211,12 @@ This shows those lines are covered. It does not show that nothing else can fail.
 - Targets passed through variables other than `$HOME` and `$PWD` (`R=~/projects/app; rm -rf $R`) and heredoc bodies fed to python/node that shell out. Real isolation is a sandbox; this hook removes the most common step.
 - It reads the command, not the files the command runs. A download saved first and run second (`curl -o i.sh …; sh i.sh`) is two ordinary commands to it, and `python3 -c "$(curl …)"` is not matched (only the shell forms are).
 - Deleting by other means is not seen: `find ~ -delete`, `xargs rm`, a `cd` in an earlier command of the session.
+- `replay.py --summary` counts what the hook says today. A push that was behind its remote last week and has been pulled since counts as 0; a command whose folder is gone is judged in the folder you run the summary from. Without `--fetch` it knows each remote only as of your last fetch.
+- The full replay (`replay.py` without `--summary`) goes through the hook's real entry point, so it runs the hook's `git fetch` for every past push it replays, as it did before 0.1.8.
 
 ## Privacy
 
-This hook runs on your computer: Claude Code starts it before each shell command. It reads the command about to run and the folder it runs in, plus your config file if you made one, and answers allow, ask or deny; the hook itself writes no file and keeps nothing. Before a `git push` it asks git about that repository (how far behind it is, how many files the push deletes) and runs `git fetch` for the current branch, so git contacts the repository's own remote and updates its local record of that branch, as a fetch always does; nothing else leaves your computer through the hook. The bundled `replay.py` runs only when you start it: it reads your Claude Code session transcripts under `~/.claude/projects`, puts the shell commands in them through the hook (a past `git push` triggers the same fetch), prints counts and sample commands, and writes a file only with `--out`. Questions: open an issue on this repository.
+This hook runs on your computer: Claude Code starts it before each shell command. It reads the command about to run and the folder it runs in, plus your config file if you made one, and answers allow, ask or deny; the hook itself writes no file and keeps nothing. Before a `git push` it asks git about that repository (how far behind it is, how many files the push deletes) and runs `git fetch` for the current branch, so git contacts the repository's own remote and updates its local record of that branch, as a fetch always does; nothing else leaves your computer through the hook. The bundled `replay.py` runs only when you start it: it reads your Claude Code session transcripts under `~/.claude/projects`, puts the shell commands in them through the hook, prints counts and sample commands, and writes a file only with `--out`. Its `--summary` screen contacts no remote unless you add `--fetch`; with `--fetch`, and in the full replay, a past `git push` triggers the same fetch. Questions: open an issue on this repository.
 
 ## License
 
