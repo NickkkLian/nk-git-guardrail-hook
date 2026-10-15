@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """replay.py — feed the Bash commands your sessions actually ran through the guardrail and count the decisions.
 
-    python3 replay.py --summary [--days 30] [--no-examples] [--fetch]   # one screen: per rule, how many of your own commands it would have met
+    python3 replay.py --summary [--days 30] [--no-examples] [--reason-sentences] [--fetch]
     python3 replay.py --demo                                    # the same screen from an invented history (nothing of yours is read)
     python3 replay.py [--days 7] [--all] [--out results.jsonl] [--hook path/to/guardrail.py] [--projects ~/.claude/projects]
     python3 replay.py --selftest
@@ -18,14 +18,18 @@ commands the hook would have refused or asked about, one of those commands as an
 never fired. Each command is judged in the folder its session recorded for it (when that folder still exists).
 What a replay does to a repository: nothing is pushed, committed or written to a working tree. For a past `git push` the
 hook asks git how far the branch is behind and how many files the push would delete. Before a live push it also runs
-`git fetch -q origin <branch>` first. --summary does not: it reaches no network, and judges the two push rules on what
+the selected remote's names without writing refs, then fetches only compared destination branches. --summary does
+not: it reaches no network, and judges the two push rules on what
 is already on disk (each repository as it is now, against its remote as of your last fetch). --summary --fetch runs
-that fetch, once per repository a past push names, so git contacts each remote and updates its local record of that
-one branch. The full replay (no --summary) goes through the hook's real entry point and fetches as it always has.
+remote-name lookup once per selected remote and each destination fetch once per repository. The full replay
+(no --summary) goes through the hook's real entry point and can fetch. Not-judged asks have a single summary count;
+tag/deletion abstentions are silent, never permission approvals.
 Either way rules 4 and 5 describe each repository today, not as it was when the command ran.
 (The self-test, which runs at every start, builds a throwaway repository whose remote is a folder next to it and
 fetches there; that never leaves the machine.)
 The examples are your own commands and can hold private paths: --no-examples leaves them out.
+--summary --reason-sentences adds a count per fixed hook reason sentence and turns examples off.
+Its labels never include an interpolated command, folder, remote or branch; missing folders stay separate.
 """
 import argparse, collections, contextlib, datetime, glob, importlib.util, io, json, os, re, subprocess, sys, tempfile
 
@@ -115,7 +119,9 @@ class NoFetch:
         return getattr(self.real, name)
 
     def run(self, argv, *a, **kw):
-        if isinstance(argv, (list, tuple)) and argv[:1] == ["git"] and "fetch" in argv[1:4]:
+        if isinstance(argv, (list, tuple)) and argv[:1] == ["git"] and "ls-remote" in argv:
+            raise RuntimeError("offline summary attempted to contact a remote")
+        if isinstance(argv, (list, tuple)) and argv[:1] == ["git"] and "fetch" in argv:
             self.skipped += 1
             return self.real.CompletedProcess(argv, 0, b"", b"")
         return self.real.run(argv, *a, **kw)
@@ -124,7 +130,8 @@ class NoFetch:
 def in_process(hook, fetch=False):
     """The hook loaded once into this process, for --summary: a month of commands is thousands of them. The hook's own
     check() gives the answer; its two questions to git (how far behind, how many deletions) are remembered per
-    repository. Without fetch the hook's `git fetch` is not started (NoFetch); with it, each repository is fetched once.
+    repository, remote, source and baseline. Without fetch the hook's `git fetch` is not started (NoFetch); with it,
+    each selected remote is read once and each compared destination in a repository is fetched once.
     Returns (decide, the questions put to git)."""
     sys.dont_write_bytecode = True                          # leave no __pycache__ next to the hook
     spec = importlib.util.spec_from_file_location("guardrail_for_replay", hook)
@@ -133,13 +140,26 @@ def in_process(hook, fetch=False):
         if getattr(mod, "subprocess", None) is not subprocess:
             raise RuntimeError("this hook does not start git the way guardrail.py does, so its fetch cannot be held back")
         mod.subprocess = NoFetch(subprocess)
+        mod.remote_state = mod.cached_remote_state
     cfg, asked, ran = mod.load_config(), {}, []
-    for name in ("behind_origin", "pending_delete_ratio"):
-        def once(repo, real=getattr(mod, name), name=name):
-            if (name, repo) not in asked:
-                ran.append((name, repo)); asked[(name, repo)] = real(repo)
-            return asked[(name, repo)]
+    for name in ("remote_state", "fetch_destination", "behind_destination", "pending_delete_ratio"):
+        def once(repo, *args, real=getattr(mod, name), name=name):
+            resolved = tuple((str(arg), arg.address) if hasattr(arg,"address") else arg for arg in args)
+            key = (name, repo, getattr(mod, "_options", None).get() if hasattr(mod, "_options") else (), *resolved)
+            if key not in asked:
+                ran.append((name, repo))
+                try: asked[key] = real(repo, *args)
+                except mod.PushNotJudged as e: asked[key] = e
+            if isinstance(asked[key], mod.PushNotJudged): raise asked[key]
+            return asked[key]
         setattr(mod, name, once)
+
+    class MissingFolder(Exception): pass
+    real_read = mod.git_read
+    def checked_read(repo, *args, **kwargs):
+        if not os.path.isdir(repo): raise MissingFolder()
+        return real_read(repo, *args, **kwargs)
+    mod.git_read = checked_read
 
     def decide_here(cmd, cwd):
         buf = io.StringIO()
@@ -148,6 +168,8 @@ def in_process(hook, fetch=False):
                 mod.check(cmd, cwd, cfg)
         except SystemExit:                                  # how the hook ends once it has printed a decision
             pass
+        except MissingFolder:
+            return "unreplayable", "the resolved repository folder no longer exists"
         except Exception:
             return "allow", ""                              # the hook fails open, and so does its replay
         out = buf.getvalue().strip()
@@ -155,6 +177,7 @@ def in_process(hook, fetch=False):
             return "allow", ""
         j = json.loads(out)["hookSpecificOutput"]
         return j["permissionDecision"], j["permissionDecisionReason"]
+    decide_here.fixed_not_judged_sentence = getattr(mod,"fixed_not_judged_sentence",lambda reason:"The branch update could not be judged.")
     return decide_here, ran
 
 
@@ -162,7 +185,8 @@ def summarize(hook, cmds, cwd, fetch=False):
     """Per rule: how many of these commands the hook refuses or asks about, the decision, and the shortest one as an example.
     A command is judged in its recorded folder when that still exists, else in cwd. No network unless fetch is set."""
     pool = [c for c in cmds if TOUCHES.search(c["cmd"])]
-    memo, counts, said, example = {}, collections.Counter(), {}, {}
+    memo, counts, said, example, unjudged = {}, collections.Counter(), {}, {}, collections.Counter()
+    reasons, sentences, missing = collections.Counter(), collections.Counter(), 0
     try:
         judge, ran = in_process(hook, fetch)
     except Exception:
@@ -171,10 +195,18 @@ def summarize(hook, cmds, cwd, fetch=False):
                              "Run it with --fetch to let the hook fetch (one `git fetch` per past push), or use the full replay.")
         judge, ran = (lambda cmd, where: decide(hook, cmd, where)), []
     for c in pool:
-        where = c["cwd"] if c.get("cwd") and os.path.isdir(c["cwd"]) else cwd
+        where = c.get("cwd") or cwd
+        if not os.path.isdir(where):
+            missing += 1; continue
         if (c["cmd"], where) not in memo:
             memo[(c["cmd"], where)] = judge(c["cmd"], where)
         dec, reason = memo[(c["cmd"], where)]
+        if dec == "unreplayable":
+            missing += 1; continue
+        if "not judged" in reason:
+            unjudged[dec] += 1
+            reasons[not_judged_reason(reason)] += 1
+            sentences[getattr(judge,"fixed_not_judged_sentence",lambda reason:"The branch update could not be judged.")(reason)] += 1
         if dec == "allow":
             continue
         n = rule_of(reason)
@@ -182,11 +214,32 @@ def summarize(hook, cmds, cwd, fetch=False):
         one = " ".join(c["cmd"].split())
         if n not in example or len(one) < len(example[n]):
             example[n] = one
-    return {"pool": len(pool), "counts": counts, "said": said, "example": example, "repos": sorted({r for _, r in ran if os.path.exists(os.path.join(r, ".git"))}), "memo": memo,
-            "fetch": fetch, "fetches": sum(1 for name, r in ran if fetch and name == "behind_origin" and os.path.exists(os.path.join(r, ".git")))}
+    return {"pool": len(pool), "counts": counts, "said": said, "example": example, "repos": sorted({r for _, r in ran}), "memo": memo,
+            "fetch": fetch, "unjudged": unjudged, "unjudged_reasons": reasons, "unjudged_sentences": sentences, "unreplayable": missing,
+            "remote_reads": sum(1 for name, r in ran if fetch and name == "remote_state"),
+            "fetches": sum(1 for name, r in ran if fetch and name == "fetch_destination")}
 
 
-def summary_lines(res, total, days, examples=True, whose="Your"):
+def not_judged_reason(reason):
+    """Fixed labels only: --no-examples must not disclose repository paths or addresses."""
+    text = reason.lower()
+    for label, words in (
+        ("folder expansion", ("git -c uses", "cd uses", "popd")),
+        ("Git options/configuration", ("global option", "config change", "pushurl", "multiple urls", "mirror", "rewriting")),
+        ("history projection", ("history", "earlier pull", "earlier merge", "earlier git pull", "earlier git merge")),
+        ("deleting command", ("deleting command",)),
+        ("commit/staging projection", ("commit", "staging", "index", "working-tree", "content conversion")),
+        ("shell quoting/wrappers", ("quoting", "wrapper", "command word", "environment", "export")),
+        ("remote resolution", ("remote", "destination", "fetch", "push.default")),
+        ("shell expansion", ("shell expansion",)),
+        ("local refs/source", ("source", "checkout", "branch", "tag")),
+        ("time limit", ("time limit",))):
+        if any(word in text for word in words): return label
+    return "other unsupported form"
+
+
+def summary_lines(res, total, days, examples=True, whose="Your", reason_sentences=False):
+    if reason_sentences: examples=False  # This mode is counts and fixed text only.
     hit = sum(res["counts"].values())
     lines = [f"{whose} last {days} days in Claude Code: {total:,} shell commands, {res['pool']:,} of them the kind a rule reads.",
              f"Run through the hook today, it would have stepped in on {hit:,}.", ""]
@@ -195,17 +248,29 @@ def summary_lines(res, total, days, examples=True, whose="Your"):
         lines.append(f"  {k:>5,}  {PLAIN[n][1]}" + (WHEN[bool(res.get("fetch"))] if n in (4, 5) else "") + (f": {SAID.get(res['said'][n], res['said'][n])}" if k else ""))
         if k and examples:
             lines.append(f"         e.g.  {res['example'][n][:110]}")
-    if res["counts"].get(0):
-        lines.append(f"  {res['counts'][0]:>5,}  stopped for a reason this summary has no line for (see the full replay, without --summary)")
+    other = res["counts"].get(0, 0) - res.get("unjudged", {}).get("ask", 0)
+    if other:
+        lines.append(f"  {other:>5,}  stopped for a reason this summary has no line for (see the full replay, without --summary)")
+    if res.get("unjudged"):
+        lines.append(f"  {sum(res['unjudged'].values()):>5,}  commands contain pushes or updates not judged by the two branch push rules "
+                     f"(allow {res['unjudged'].get('allow', 0)}, ask {res['unjudged'].get('ask', 0)}); see the hook's --try reason")
+        for reason, count in sorted(res.get("unjudged_reasons", {}).items()):
+            lines.append(f"         {count:>5,}  {reason}")
+        if reason_sentences:
+            lines.append("         By fixed hook reason sentence:")
+            for sentence,count in sorted(res.get("unjudged_sentences",{}).items()):
+                lines.append(f"         {count:>5,}  {sentence}")
+    if res.get("unreplayable"):
+        lines.append(f"  {res['unreplayable']:>5,}  could not be replayed: the recorded or resolved folder no longer exists (excluded from interventions and not-judged counts)")
     r = len(res.get("repos", []))
     rs = f"{r} repositor{'y' if r == 1 else 'ies'}"
     if res.get("fetch"):
-        lines += ["", f"The two push lines were judged after `git fetch -q origin <branch>` in {rs} ({'it was' if r == 1 else 'each'} fetched once), which is what",
+        lines += ["", f"The two push lines were judged after fetching the named destinations in {rs} ({res.get('fetches', 0)} destination fetches), which is what",
                   "the hook does before a live push: each repository as it is now, against its remote as it is now."]
     else:
         lines += ["", "The two push lines are judged on what is already on your disk: each repository as it is now, against its remote as",
                   "of your last fetch. Nothing was fetched, so a repository you have not fetched lately can be further behind than this says.",
-                  f"--fetch asks the remotes first: one `git fetch` of the current branch in each repository a past push names ({rs} here)."]
+                  f"--fetch asks the remotes first: read each selected remote's ref names, then fetch only the compared destinations ({rs} here)."]
     lines.append("The other five are judged on the command itself. Nothing was pushed, committed or changed in a working tree.")
     if examples and hit and whose == "Your":
         lines.append("The examples are commands from your own sessions: read them before you share this screen (--no-examples leaves them out).")
@@ -311,7 +376,7 @@ def summary_selftest(hook):
             res_f = summarize(hook, cmds, d, fetch=True)
             text_f = summary_lines(res_f, len(cmds), 30)
             out.append((at(shop, "origin/main") == tip and res_f["counts"].get(4, 0) == 6 and sum("as of a fetch just now" in l for l in text_f if l.strip()[:1].isdigit()) == 2
-                        and any("git fetch -q origin <branch>` in 1 repository" in l for l in text_f) and not any("Nothing was fetched" in l for l in text_f),
+                        and any("fetching the named destinations in 1 repository" in l for l in text_f) and not any("Nothing was fetched" in l for l in text_f),
                         f"summary: --fetch fetches: afterwards the repository's record of its remote is the remote's newest commit ({at(shop, 'origin/main') == tip}), and the screen says so"))
             out.append((len(res_f["repos"]) == 1 and res_f["fetches"] == 1 and res_f["pool"] == 43,
                         f"summary: with --fetch a repository is fetched once however many pushes it saw ({res_f['fetches']} fetch for 6 pushes written two ways; {len(res_f['repos'])} repository asked)"))
@@ -355,6 +420,7 @@ def main():
     ap.add_argument("--days", type=int); ap.add_argument("--all", action="store_true"); ap.add_argument("--out")
     ap.add_argument("--summary", action="store_true"); ap.add_argument("--no-examples", action="store_true"); ap.add_argument("--demo", action="store_true")
     ap.add_argument("--fetch", action="store_true")
+    ap.add_argument("--reason-sentences", action="store_true")
     ap.add_argument("--hook", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "guardrail.py"))
     ap.add_argument("--projects", default=os.path.expanduser("~/.claude/projects")); ap.add_argument("--selftest", action="store_true")
     ap.add_argument("-h", "--help", action="store_true")
@@ -371,11 +437,11 @@ def main():
             projects, _ = demo_world(d)
             cmds = load_cmds(projects, days, keep_cwd=True)
             print("An invented history: Sam, the shop repository and every command below are made up for this demo.\n")
-            print("\n".join(summary_lines(summarize(a.hook, cmds, d, a.fetch), len(cmds), days, examples=not a.no_examples, whose="Sam's")))
+            print("\n".join(summary_lines(summarize(a.hook, cmds, d, a.fetch), len(cmds), days, examples=not a.no_examples, whose="Sam's",reason_sentences=a.reason_sentences)))
         return 0
     if a.summary:
         cmds = load_cmds(a.projects, days, keep_cwd=True)
-        print("\n".join(summary_lines(summarize(a.hook, cmds, os.getcwd(), a.fetch), len(cmds), days, examples=not a.no_examples)))
+        print("\n".join(summary_lines(summarize(a.hook, cmds, os.getcwd(), a.fetch), len(cmds), days, examples=not a.no_examples,reason_sentences=a.reason_sentences)))
         return 0
     cmds = load_cmds(a.projects, days)
     pool = cmds if a.all else [c for c in cmds if any(k in c["cmd"] for k in SUBSET)]
