@@ -1,5 +1,28 @@
 # nk-git-guardrail-hook
 
+**Ask before risky git and shell commands run in Claude Code — including a normal push that would delete most files.**
+
+For developers working with coding agents: seven rules inspect command text and, for push rules, repository state. This is a Claude Code PreToolUse hook; its Python scripts can also be tried directly.
+
+**Try without installing a hook** (Python 3, Git; no packages):
+
+```sh
+git clone https://github.com/NickkkLian/nk-git-guardrail-hook.git
+cd nk-git-guardrail-hook
+python3 scripts/replay.py --demo
+python3 scripts/guardrail.py --try 'rm -rf ~'
+```
+
+The demo uses invented history. `--try` reports a decision; it does not execute the quoted command. The second command should print `ask` and explain the home-folder risk. Installation and tests are under [Try it](#try-it).
+
+![Actual dry run: a recursive home-folder deletion gets an ask decision and a specific reason; the quoted command was not executed](docs/launch-dry-run.png)
+
+This image renders the decision and reason from a real `--try` run on 2026-10-20; it is not Claude Code's own dialog. The recorded 40-file push example and its limits follow below.
+
+This is a guardrail with known misses, not a security boundary. Internal errors fail open, and `--force-with-lease` is allowed by the force-push rule. Push checks may fetch their compared destination; the two commands above do not inspect your history or contact a remote. There is no hosted interactive demo.
+
+## What the hook checks
+
 A [Claude Code](https://code.claude.com) skill. A PreToolUse hook for Claude Code that stops before seven risky git and shell commands — force push, git add -A in a shared checkout, making a repo public, pushing while behind the remote, a push that records a mass deletion, a recursive rm on the home folder or the filesystem root, a download run straight in a shell.
 
 **What you get.** Deleting every file and committing exits 0, and nothing in git stops the push that follows. The hook counts what that push would delete and asks first. A real run of 0.1.9 on a test repository with 40 files, 2026-10-14:
