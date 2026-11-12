@@ -2,30 +2,7 @@
 
 **Ask before risky git and shell commands run in Claude Code — including a normal push that would delete most files.**
 
-For developers working with coding agents: seven rules inspect command text and, for push rules, repository state. This is a Claude Code PreToolUse hook; its Python scripts can also be tried directly.
-
-**Try without installing a hook** (Python 3, Git; no packages):
-
-```sh
-git clone https://github.com/NickkkLian/nk-git-guardrail-hook.git
-cd nk-git-guardrail-hook
-python3 scripts/replay.py --demo
-python3 scripts/guardrail.py --try 'rm -rf ~'
-```
-
-The demo uses invented history. `--try` reports a decision; it does not execute the quoted command. The second command should print `ask` and explain the home-folder risk. Installation and tests are under [Try it](#try-it).
-
-![Actual dry run: a recursive home-folder deletion gets an ask decision and a specific reason; the quoted command was not executed](docs/launch-dry-run.png)
-
-This image renders the decision and reason from a real `--try` run on 2026-10-20; it is not Claude Code's own dialog. The recorded 40-file push example and its limits follow below.
-
-This is a guardrail with known misses, not a security boundary. Internal errors fail open, and `--force-with-lease` is allowed by the force-push rule. Push checks may fetch their compared destination; the two commands above do not inspect your history or contact a remote. There is no hosted interactive demo.
-
-## What the hook checks
-
-A [Claude Code](https://code.claude.com) skill. A PreToolUse hook for Claude Code that stops before seven risky git and shell commands — force push, git add -A in a shared checkout, making a repo public, pushing while behind the remote, a push that records a mass deletion, a recursive rm on the home folder or the filesystem root, a download run straight in a shell.
-
-**What you get.** Deleting every file and committing exits 0, and nothing in git stops the push that follows. The hook counts what that push would delete and asks first. A real run of 0.1.9 on a test repository with 40 files, 2026-10-14:
+**What you get** (a real run on a test repository with 40 files): deleting every file and committing exits 0, and nothing in git stops the push that follows. The hook counts what that push would delete and asks first.
 
 ```text
 $ git rm -rq src && git commit -qm "sync"; echo "exit $?"
@@ -38,7 +15,30 @@ ask  🚨 this push deletes 40 files (adds/modifies only 0). Incident: an interr
 
 ![nk-git-guardrail-hook 0.1.9 on a test repository with 40 files: git rm and git commit exit 0, the diff says 40 files changed, 40 deletions, and the hook answers ask: this push deletes 40 files](https://raw.githubusercontent.com/NickkkLian/nickkk-skills/main/gallery/results/nk-git-guardrail-hook-mass-deletion.png)
 
-The three lines that build that repository are under [Try it](#try-it). `--try` prints the answer the hook would give for a command and does not run the command. Installed as a hook, `ask` stops the push before it runs. An interactive session shows you that text and waits for your answer; a non-interactive one (`claude -p`) refuses the push and hands the text back to the agent. The picture is the same run drawn from its text, not Claude Code's own dialog.
+For developers working with coding agents: seven rules inspect command text and, for push rules, repository state. This is a Claude Code PreToolUse hook; its Python scripts can also be tried directly.
+
+**Try without installing a hook** (Python 3, Git; no packages):
+
+```sh
+git clone https://github.com/NickkkLian/nk-git-guardrail-hook.git
+cd nk-git-guardrail-hook
+python3 scripts/replay.py --demo
+python3 scripts/guardrail.py --try 'rm -rf ~'
+```
+
+The demo uses invented history. `--try` reports a decision; it does not execute the quoted command. The second command should print `ask` and explain the home-folder risk. Neither command inspects your history or contacts a remote. Installation and tests are under [Try it](#try-it).
+
+Part of [nickkk-skills](https://github.com/NickkkLian/nickkk-skills): 14 agent skills that work with numbers, check an agent's work, guard a repository, and write and present.
+
+## What the hook checks
+
+A [Claude Code](https://code.claude.com) skill. A PreToolUse hook for Claude Code that stops before seven risky git and shell commands — force push, git add -A in a shared checkout, making a repo public, pushing while behind the remote, a push that records a mass deletion, a recursive rm on the home folder or the filesystem root, a download run straight in a shell.
+
+The three lines that build the 40-file repository at the top of this page are under [Try it](#try-it). `--try` prints the answer the hook would give for a command and does not run the command. Installed as a hook, `ask` stops the push before it runs. An interactive session shows you that text and waits for your answer; a non-interactive one (`claude -p`) refuses the push and hands the text back to the agent. The picture at the top is the same run drawn from its text, not Claude Code's own dialog.
+
+![Actual dry run: a recursive home-folder deletion gets an ask decision and a specific reason; the quoted command was not executed](docs/launch-dry-run.png)
+
+This image renders the decision and reason from a real `--try 'rm -rf ~'` run on 2026-10-20; it is not Claude Code's own dialog either.
 
 Three of its seven rules. The first two look at the repository, not at the command: `git push origin main` is the same text whether it deletes 0 files or 40. Each one asks before the command runs:
 
@@ -54,17 +54,12 @@ Three of its seven rules. The first two look at the repository, not at the comma
 
 ![nk-git-guardrail-hook](https://raw.githubusercontent.com/NickkkLian/nickkk-skills/main/gallery/social/nk-git-guardrail-hook.png)
 
-Part of [nickkk-skills](https://github.com/NickkkLian/nickkk-skills) — skills that stop an AI coding agent's
-"done, tested, safe" from being taken on faith.
-
 ## Try it
 
-Nothing is installed and nothing under `~/.claude` changes: clone, run the self-test, run the example.
+Clone and run the example:
 
 ```bash
 git clone https://github.com/NickkkLian/nk-git-guardrail-hook && cd nk-git-guardrail-hook
-python3 scripts/guardrail.py --selftest
-python3 scripts/replay.py --selftest
 python3 scripts/replay.py --demo
 python3 scripts/guardrail.py --try "git push --force-with-lease"
 python3 scripts/guardrail.py --try "git push origin +main"
@@ -73,16 +68,9 @@ python3 scripts/guardrail.py --try "rm -rf ~"
 python3 scripts/guardrail.py --try "git add -A"
 ```
 
-The self-tests print:
+None of this installs anything or changes `~/.claude`. The first `--try` line below is a push: for a push, `--try` looks at the clone's remote the way the hook does before a real push.
 
-```text
-✔ guardrail selftest: 110 samples (ask 58 / deny 14 / allow 38) · 7 of 7 rules on with no config file
-replay selftest · 17/17 passed
-```
-
-After its first line, `guardrail.py --selftest` runs eight push lines against temporary repositories and prints its time (under 16 seconds on the two Python versions tried). `python3 scripts/guardrail.py --selftest-full` runs every push case in the four test files next to it and takes several minutes. The first `--try` line below is a push: for a push, `--try` looks at the clone's remote the way the hook does before a real push.
-
-The example commands print this (0.1.9, copied from the terminal on 2026-10-14; every command exits 0). The first screen is `--demo`: Sam, the shop repository and every command on it are invented, and nothing of yours is read. `python3 scripts/replay.py --summary` prints the same screen from your own last 30 days.
+The example commands print this (every command exits 0). The first screen is `--demo`: Sam, the shop repository and every command on it are invented, and nothing of yours is read. `python3 scripts/replay.py --summary` prints the same screen from your own last 30 days.
 
 ```text
 $ python3 scripts/replay.py --demo
@@ -252,8 +240,19 @@ python3 scripts/push_work_selftest.py --selftest
 python3 scripts/replay.py --selftest
 ```
 
+The first and last self-tests print:
+
+```text
+✔ guardrail selftest: 110 samples (ask 58 / deny 14 / allow 38) · 7 of 7 rules on with no config file
+replay selftest · 17/17 passed
+```
+
+After its first line, `guardrail.py --selftest` runs eight push lines against temporary repositories and prints its time (under 16 seconds on the two Python versions tried). `python3 scripts/guardrail.py --selftest-full` runs every push case in the four test files next to it and takes several minutes.
+
+The 40-file run at the top of this page is 0.1.9, recorded on 2026-10-14; the example output under [Try it](#try-it) is 0.1.9, copied from the terminal on 2026-10-14.
+
 Standard library only, Python 3.9+, and git. On 2026-10-14 every self-test above passed, and
-`breakcheck.py` from [nk-breakable-selftest](https://github.com/NickkkLian/nk-breakable-selftest) broke each script on purpose in a sandbox copy:
+a break-check script broke each script on purpose in a sandbox copy:
 
 - `guardrail.py`: 18 hand-written breaks (one per rule, one for each form added in 0.1.5 and 0.1.6, and one that makes rule 6 depend on a config file again); 16 turned the self-test red without a traceback. Not covered: the self-test stayed green with rule 1 force push, rule 1 without the + refspec form switched off (a second force-push check, for a resolved argument or alias, still asks when either is switched off, so these two breaks do not show the self-test is blind there).
 - `push_line_selftest.py`: no break run. It is a test file, the cases that `guardrail.py --selftest-full` runs; nothing in it was broken on purpose.
@@ -268,6 +267,7 @@ This shows those lines are covered. It does not show that nothing else can fail.
 
 ## Limits
 
+- A guardrail with known misses, not a security boundary. Internal errors fail open, and `--force-with-lease` is allowed by the force-push rule. Push checks may fetch their compared destination. There is no hosted interactive demo.
 - Seven rules, not a full safety net. `git reset --hard`, `git clean -f`, `git checkout -- .` and `git branch -D` are allowed: none has an incident behind it here. [cc-safety-net](https://github.com/kenryu42/claude-code-safety-net) blocks those and many more, for more agents; the two can run side by side.
 - Rule 6 asks about four targets with no config: the home folder, the filesystem root, a folder above home, and `.` or `..`. It does not ask about a folder inside home (`~/Documents`), a bare `*` in an ordinary folder, or a project folder, unless `protected_roots` names it. cc-safety-net asks about every recursive `rm` outside the working directory.
 - The two push rules (behind the remote, mass deletion) in 0.1.9, in short. They judge the branch the push would send against the branch it would update, and they read the rest of the command line for a commit and for files removed before it. Where they cannot work the push out (an address that matches no configured remote, a commit id as the source, an earlier `git pull` or `git merge` not joined to the push by `&&`, a folder written as a shell expansion), they ask and say "not judged" instead of giving a count. A push that is itself hidden behind `eval`, a variable, `$(which git)` or text piped into a shell is asked about the same way. A wipe can still pass silently when the files are removed before the commit by something the hook does not simulate: a script (`python3 -c`, `perl -e`), another program (`mv`, `trash`), Git plumbing (`git read-tree`, `git update-index --force-remove`), an `rm` behind `eval`, a variable, `bash -c`, `sh -c` (also through `find -exec` or `xargs`), `env -S`, `env -C` or an unknown wrapper such as `doas`, or a target written with braces or in different letter case. A target reached through a symbolic link was not tested on this version. The supported forms, one by one, are in [the reference](references/settings.md#push-resolution-and-limits).
