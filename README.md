@@ -32,7 +32,7 @@ Part of [nickkk-skills](https://github.com/NickkkLian/nickkk-skills): 14 agent s
 
 ## What the hook checks
 
-A [Claude Code](https://code.claude.com) skill. A PreToolUse hook for Claude Code that stops before seven risky git and shell commands — force push, git add -A in a shared checkout, making a repo public, pushing while behind the remote, a push that records a mass deletion, a recursive rm on the home folder or the filesystem root, a download run straight in a shell.
+A PreToolUse hook for [Claude Code](https://code.claude.com) that stops before seven risky git and shell commands — force push, git add -A in a shared checkout, making a repo public, pushing while behind the remote, a push that records a mass deletion, a recursive rm on the home folder or the filesystem root, a download run straight in a shell.
 
 The three lines that build the 40-file repository at the top of this page are under [Try it](#try-it). `--try` prints the answer the hook would give for a command and does not run the command. Installed as a hook, `ask` stops the push before it runs. An interactive session shows you that text and waits for your answer; a non-interactive one (`claude -p`) refuses the push and hands the text back to the agent. The picture at the top is the same run drawn from its text, not Claude Code's own dialog.
 
@@ -127,7 +127,7 @@ The demo above is a rendering of an earlier run and cuts its longest lines short
 - Ask by default; deny only where the agent can fix its own command; fail-open when the hook breaks.
 - `replay.py --summary` is the first look, before you install anything: one screen that says, for each rule, how many of your own shell commands from the last 30 days the hook would have refused or asked about, with one of those commands as an example and a plain 0 where the rule never fired. It reaches no network: the two push rules are judged against each remote as of your last fetch, and the screen says so. `--summary --fetch` asks the remotes first (one remote-name lookup per selected remote in each repository a past push names, then one narrow fetch per compared destination). Not-judged asks are counted once and split by reason; missing recorded or resolved folders are reported separately as unable to replay. `--demo` prints the same screen from an invented history and reads nothing of yours.
 - `replay.py` without `--summary` prints the full allow, ask and deny distribution with samples, so a rule is tuned on evidence.
-- `--try "<command>"` shows the decision; `--selftest` runs the original 110 samples plus eight quick push-line checks (it prints its time). `--selftest-full` adds all push/projection/review regressions and the hanging-child case; allow several minutes. All seven rules are demonstrated without a config file.
+- `--try "<command>"` shows the decision; `--selftest` runs the original 110 samples plus eight quick push-line checks (it prints its time). `--selftest-full` adds all push/projection/review regressions and the hanging-child case; allow several minutes.
 
 The full procedure, the boundaries and where the rules came from are in [SKILL.md](SKILL.md).
 
@@ -152,7 +152,7 @@ outright; it cannot look at the repository, so it cannot tell a normal push from
 
 ## Why it is built this way
 
-**The idea.** A red line that lives in a document is enforced by whoever happens to remember it. This hook moves seven of them into the one place every Bash command passes through, and its prompt says what is at stake: rules 1–5 name the real incident behind them; rules 6 and 7 have no recorded incident, and their prompts say why the step is irreversible or dangerous.
+**The idea.** A red line that lives in a document is enforced by whoever happens to remember it. This hook moves seven of them into the one place every Bash command passes through, and its prompt says what is at stake.
 
 **Where it came from.** Started as six rules after a review of the author's own setup found enforcement to be its thinnest part — many red lines, nothing enforcing them.
 
@@ -193,7 +193,7 @@ Without opening a session, the same two steps work from a shell: `claude plugin 
 
 <img src="https://raw.githubusercontent.com/NickkkLian/nickkk-skills/main/gallery/panel-route/panel-route.gif" alt="Adding the marketplace and installing a skill in the desktop app" width="640">
 
-<sub>Recorded on 2026-09-16, when the marketplace listed ten skills, all at version 0.1.0; it lists more now. The repository list in this recording shows the recorder's own repositories because a GitHub account is connected; yours will show yours. Type the full name as in step 4.</sub>
+<sub>Recorded on 2026-09-16; the marketplace lists more skills now. The repository list shows the recorder's own repositories because a GitHub account is connected; yours will show yours. Type the full name as in step 4.</sub>
 
 1. In the chat box, type `/plugin marketplace` and press Enter (or open **Settings → Customize → Plugins**). The **Plugins** panel opens.
    <br><img src="https://raw.githubusercontent.com/NickkkLian/nickkk-skills/main/gallery/panel-route/step1-type-plugin-marketplace.png" alt="/plugin marketplace typed in the chat box" width="480">
@@ -255,14 +255,11 @@ Standard library only, Python 3.9+, and git. On 2026-10-14 every self-test above
 a break-check script broke each script on purpose in a sandbox copy:
 
 - `guardrail.py`: 18 hand-written breaks (one per rule, one for each form added in 0.1.5 and 0.1.6, and one that makes rule 6 depend on a config file again); 16 turned the self-test red without a traceback. Not covered: the self-test stayed green with rule 1 force push, rule 1 without the + refspec form switched off (a second force-push check, for a resolved argument or alias, still asks when either is switched off, so these two breaks do not show the self-test is blind there).
-- `push_line_selftest.py`: no break run. It is a test file, the cases that `guardrail.py --selftest-full` runs; nothing in it was broken on purpose.
-- `push_review_selftest.py`: no break run. It is a test file, the cases that `guardrail.py --selftest-full` runs; nothing in it was broken on purpose.
-- `push_selftest.py`: no break run. It is a test file, the cases that `guardrail.py --selftest-full` runs; nothing in it was broken on purpose.
-- `push_work_selftest.py`: no break run. It is a test file, the cases that `guardrail.py --selftest-full` runs; nothing in it was broken on purpose.
+- `push_line_selftest.py`, `push_review_selftest.py`, `push_selftest.py`, `push_work_selftest.py`: no break run. They are test files, the cases that `guardrail.py --selftest-full` runs; nothing in them was broken on purpose.
 - `replay.py`: 13 hand-written breaks (one for each self-test case of the summary); each turned the self-test red without a traceback.
 
 The unmutated control stayed green every time. Only lines that record a finding, raise, or return a failing exit code
-were broken (the tool's pattern, or the hand-written list); a line number refers to the script as shipped in this version.
+were broken.
 This shows those lines are covered. It does not show that nothing else can fail.
 
 ## Limits
